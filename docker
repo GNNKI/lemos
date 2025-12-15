@@ -1,0 +1,41 @@
+FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /workspace
+
+# Basic OS deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget bzip2 ca-certificates git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install an older Miniconda that still plays nicely with legacy Python envs
+# (this installs conda into /opt/conda)
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-4.5.12-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm -f /tmp/miniconda.sh
+ENV PATH=/opt/conda/bin:$PATH
+
+# Copy your env file and create the env
+COPY environment.yml /workspace/environment.yml
+RUN conda config --set channel_priority flexible && \
+    conda env create -f /workspace/environment.yml && \
+    conda clean -afy
+
+# Activate env by default
+SHELL ["bash", "-lc"]
+ENV CONDA_DEFAULT_ENV=Lemos
+ENV PATH=/opt/conda/envs/Lemos/bin:$PATH
+
+# IMPORTANT: your env.yml installs tensorflow==1.10.0 (CPU).
+# Swap it to tensorflow-gpu==1.10.0 without changing your env file.
+RUN pip uninstall -y tensorflow && \
+    pip install --no-cache-dir tensorflow-gpu==1.10.0
+
+# (Optional) sanity check during build
+RUN python - <<'PY'\n\
+import tensorflow as tf\n\
+print(tf.__version__)\n\
+print('built_with_cuda:', tf.test.is_built_with_cuda())\n\
+PY
+
+CMD ["bash"]
