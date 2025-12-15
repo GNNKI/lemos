@@ -57,4 +57,3 @@ dependencies:
       - termcolor==1.1.0
       - werkzeug==1.0.1
       - zipp==1.2.0
-prefix: /home/karol/anaconda3/envs/Lemos
