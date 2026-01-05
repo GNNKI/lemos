@@ -1,0 +1,19 @@
+name: cuda_gnn
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  # Pin numpy<2 to avoid runtime crashes with extensions compiled against NumPy 1.x
+  - numpy<2
+  - pip
+  - pip:
+      # TensorFlow 2.15.x is the last line that keeps Keras 2.x (Keras 3 breaks
+      # tf.compat.v1 LSTMCell, as your check.sh notes).
+      #
+      # Use the official pip wheel, which is built with CUDA support on Linux.
+      # (CUDA libraries are pulled in via pip "nvidia-*" dependencies.)
+      - tensorflow==2.15.1
+      - keras<3
+      - networkx==3.1
