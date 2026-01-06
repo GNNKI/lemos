@@ -1,19 +1,5 @@
-"""
-Defines the high‑level graph colouring model. This file constructs
-placeholders, the graph neural network, the voting MLP and the
-optimiser. TensorFlow 2.x deprecated many TF 1.x constructs such as
-placeholders, sessions and `tf.train.Optimizer`. To allow the
-existing code to run on modern GPUs without recreating the old
-environment, we import TensorFlow through the v1 compatibility API
-(`tf.compat.v1`) and disable v2 behaviour. We also replace
-`tf.contrib.layers.xavier_initializer` with Keras Glorot initialisers
-and use `tf.compat.v1.nn.rnn_cell.LSTMCell` (via GraphNN) for the
-recurrent components.
-"""
-
 import sys, os
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
 
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn import GraphNN
@@ -22,35 +8,33 @@ from mlp import Mlp
 def build_network(d):
 
     # Define hyperparameters
+    d = d
     learning_rate = 2e-5
     l2norm_scaling = 1e-10
     global_norm_gradient_clipping_ratio = 0.65
 
-    # Placeholders for the model inputs. We use `tf.compat.v1.placeholder` to
-    # retain the TF 1.x style of graph construction. Each placeholder
-    # represents a batch of inputs to the model. See the accompanying
-    # documentation for details on the shapes of these tensors.
-    cn_exists = tf.compat.v1.placeholder(tf.float32, shape=(None,), name='cn_exists')
-    n_vertices = tf.compat.v1.placeholder(tf.int32, shape=(None,), name='n_vertices')
-    n_edges = tf.compat.v1.placeholder(tf.int32, shape=(None,), name='n_edges')
-    M_matrix = tf.compat.v1.placeholder(tf.float32, shape=(None, None), name='M')
-    VC_matrix = tf.compat.v1.placeholder(tf.float32, shape=(None, None), name='VC')
-    chrom_number = tf.compat.v1.placeholder(tf.float32, shape=(None,), name='chrom_number')
-    time_steps = tf.compat.v1.placeholder(tf.int32, shape=(), name='time_steps')
-    colors_initial_embeddings = tf.compat.v1.placeholder(tf.float32, shape=(None, d), name='colors_initial_embeddings')
+    # Placeholder for answers to the decision problems (one per problem)
+    cn_exists = tf.placeholder( tf.float32, shape = (None,), name = 'cn_exists' )
+    # Placeholders for the list of number of vertices and edges per instance
+    n_vertices  = tf.placeholder( tf.int32, shape = (None,), name = 'n_vertices')
+    n_edges     = tf.placeholder( tf.int32, shape = (None,), name = 'n_edges')
+    # Placeholder for the adjacency matrix connecting each vertex to its neighbors 
+    M_matrix   = tf.placeholder( tf.float32, shape = (None,None), name = "M" )
+    # Placeholder for the adjacency matrix connecting each vertex to its candidate colors
+    VC_matrix = tf.placeholder( tf.float32, shape = (None,None), name = "VC" )
+    # Placeholder for chromatic number (one per problem)
+    chrom_number = tf.placeholder( tf.float32, shape = (None,), name = "chrom_number" )
+    # Placeholder for the number of timesteps the GNN is to run for
+    time_steps  = tf.placeholder( tf.int32, shape = (), name = "time_steps" )
+    #Placeholder for initial color embeddings for the given batch
+    colors_initial_embeddings = tf.placeholder( tf.float32, shape=(None,d), name= "colors_initial_embeddings")
     
     
     # All vertex embeddings are initialized with the same value, which is a trained parameter learned by the network
     total_n = tf.shape(M_matrix)[1]
-    # Define a trainable initial embedding for all vertices. We use
-    # `tf.compat.v1.get_variable` to create this variable and
-    # `tf.random.normal` for initialisation. The embedding is scaled by
-    # the square root of the embedding dimension to stabilise training.
-    v_init = tf.compat.v1.get_variable(
-        initializer=tf.compat.v1.random_normal((1, d)), dtype=tf.float32, name='V_init'
-    )
+    v_init = tf.get_variable(initializer=tf.random_normal((1,d)), dtype=tf.float32, name='V_init')
     vertex_initial_embeddings = tf.tile(
-        tf.divide(v_init, tf.sqrt(tf.cast(d, tf.float32))),
+        tf.div(v_init, tf.sqrt(tf.cast(d, tf.float32))),
         [total_n, 1]
     )
     
@@ -64,22 +48,22 @@ def build_network(d):
         {
             # V is the set of vertex embeddings
             'V': d,
-            # C is for colour embeddings
+            # C is for color embeddings
             'C': d
         },
         {
-            # M is a V×V adjacency matrix connecting each vertex to its neighbours
-            'M': ('V', 'V'),
-            # VC is a V×C adjacency matrix connecting each vertex to its candidate colours
-            'VC': ('V', 'C')
+            # M is a V×V adjacency matrix connecting each vertex to its neighbors
+            'M': ('V','V'),
+            # MC is a VxC adjacency matrix connecting each vertex to its candidate colors
+            'VC': ('V','C')
         },
         {
-            # V_msg_C is an MLP that computes messages from vertex embeddings to colour embeddings
-            'V_msg_C': ('V', 'C'),
-            # C_msg_V is an MLP that computes messages from colour embeddings to vertex embeddings
-            'C_msg_V': ('C', 'V')
+            # V_msg_C is a MLP which computes messages from vertex embeddings to color embeddings
+            'V_msg_C': ('V','C'),
+            # C_msg_V is a MLP which computes messages from color embeddings to vertex embeddings
+            'C_msg_V': ('C','V')
         },
-        {   # Update rule for V: V(t+1) <- concat( M × V(t), VC × C_msg_V(C(t)) )
+        {   # V(t+1) <- Vu( M x V, VC x CmsgV(C) )
             'V': [
                 {
                     'mat': 'M',
@@ -91,7 +75,7 @@ def build_network(d):
                     'msg': 'C_msg_V'
                 }
             ],
-            # Update rule for C: C(t+1) <- VCᵀ × V_msg_C(V(t))
+            # C(t+1) <- Cu( VC^T x VmsgC(V))
             'C': [
                 {
                     'mat': 'VC',
@@ -100,8 +84,9 @@ def build_network(d):
                     'var': 'V'
                 }
             ]
-        },
-        name='graph-colouring'
+        }
+        ,
+        name='graph-coloring'
     )
 
     # Populate GNN dictionary
@@ -115,24 +100,22 @@ def build_network(d):
     GNN["time_steps"]   = time_steps
     GNN["colors_initial_embeddings"] = colors_initial_embeddings
 
-    # Define V_vote, which will compute one logit for each vertex. The
-    # Xavier initialiser is replaced by glorot_uniform from Keras. A
-    # separate initialiser instance is created for the kernel and bias.
+    # Define V_vote, which will compute one logit for each vertex
     V_vote_MLP = Mlp(
-        layer_sizes=[d for _ in range(3)],
-        activations=[tf.nn.relu for _ in range(3)],
-        output_size=1,
-        name='V_vote',
-        name_internal_layers=True,
-        kernel_initializer=tf.compat.v1.keras.initializers.glorot_uniform(),
-        bias_initializer=tf.compat.v1.keras.initializers.glorot_uniform()
-    )
+        layer_sizes = [ d for _ in range(3) ],
+        activations = [ tf.nn.relu for _ in range(3) ],
+        output_size = 1,
+        name = 'V_vote',
+        name_internal_layers = True,
+        kernel_initializer = tf.contrib.layers.xavier_initializer(),
+        bias_initializer = tf.zeros_initializer()
+        )
     
     # Get the last embeddings
     last_states = gnn(
-      {"M": M_matrix, "VC": VC_matrix, 'chrom_number': chrom_number},
-      {"V": vertex_initial_embeddings, "C": colors_initial_embeddings},
-      time_steps=time_steps
+      { "M": M_matrix, "VC": VC_matrix, 'chrom_number': chrom_number },
+      { "V": vertex_initial_embeddings, "C": colors_initial_embeddings },
+      time_steps = time_steps
     )
     GNN["last_states"] = last_states
     V_n = last_states['V'].h
@@ -146,61 +129,40 @@ def build_network(d):
     num_problems = tf.shape(n_vertices)[0]
 
     # Compute a logit probability for each problem
-    pred_logits = tf.compat.v1.while_loop(
+    pred_logits = tf.while_loop(
         lambda i, pred_logits: tf.less(i, num_problems),
-        lambda i, pred_logits: (
-            i + 1,
-            pred_logits.write(
-                i,
-                tf.reduce_mean(
-                    V_vote[
-                        tf.reduce_sum(n_vertices[0:i]): tf.reduce_sum(n_vertices[0:i]) + n_vertices[i]
-                    ]
+        lambda i, pred_logits:
+            (
+                (i+1),
+                pred_logits.write(
+                    i,
+                    tf.reduce_mean(V_vote[tf.reduce_sum(n_vertices[0:i]):tf.reduce_sum(n_vertices[0:i])+n_vertices[i]])
                 )
-            )
-        ),
+            ),
         [0, tf.TensorArray(size=num_problems, dtype=tf.float32)]
-    )[1].stack()
+        )[1].stack()
     # Convert logits into probabilities
     GNN['predictions'] = tf.sigmoid(pred_logits)
 
     # Compute True Positives, False Positives, True Negatives, False Negatives, accuracy
-    GNN['TP'] = tf.reduce_sum(
-        tf.multiply(cn_exists, tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32))
-    )
-    GNN['FP'] = tf.reduce_sum(
-        tf.multiply(cn_exists, tf.cast(tf.not_equal(cn_exists, tf.round(GNN['predictions'])), tf.float32))
-    )
-    GNN['TN'] = tf.reduce_sum(
-        tf.multiply(tf.ones_like(cn_exists) - cn_exists, tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32))
-    )
-    GNN['FN'] = tf.reduce_sum(
-        tf.multiply(tf.ones_like(cn_exists) - cn_exists, tf.cast(tf.not_equal(cn_exists, tf.round(GNN['predictions'])), tf.float32))
-    )
-    GNN['acc'] = tf.reduce_mean(
-        tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32)
-    )
+    GNN['TP'] = tf.reduce_sum(tf.multiply(cn_exists, tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32)))
+    GNN['FP'] = tf.reduce_sum(tf.multiply(cn_exists, tf.cast(tf.not_equal(cn_exists, tf.round(GNN['predictions'])), tf.float32)))
+    GNN['TN'] = tf.reduce_sum(tf.multiply(tf.ones_like(cn_exists)-cn_exists, tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32)))
+    GNN['FN'] = tf.reduce_sum(tf.multiply(tf.ones_like(cn_exists)-cn_exists, tf.cast(tf.not_equal(cn_exists, tf.round(GNN['predictions'])), tf.float32)))
+    GNN['acc'] = tf.reduce_mean(tf.cast(tf.equal(cn_exists, tf.round(GNN['predictions'])), tf.float32))
 
     # Define loss
-    GNN['loss'] = tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(labels=cn_exists, logits=pred_logits)
-    )
+    GNN['loss'] = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=cn_exists, logits=pred_logits))
 
     # Define optimizer
-    optimizer = tf.compat.v1.train.AdamOptimizer(name='Adam', learning_rate=learning_rate)
+    optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=learning_rate)
 
     # Compute cost relative to L2 normalization
-    vars_cost = tf.add_n([tf.nn.l2_loss(var) for var in tf.compat.v1.trainable_variables()])
+    vars_cost = tf.add_n([ tf.nn.l2_loss(var) for var in tf.trainable_variables() ])
 
     # Define gradients and train step
-    grads, _ = tf.clip_by_global_norm(
-        tf.compat.v1.gradients(
-            GNN['loss'] + tf.multiply(vars_cost, l2norm_scaling),
-            tf.compat.v1.trainable_variables()
-        ),
-        global_norm_gradient_clipping_ratio
-    )
-    GNN['train_step'] = optimizer.apply_gradients(zip(grads, tf.compat.v1.trainable_variables()))
+    grads, _ = tf.clip_by_global_norm(tf.gradients(GNN['loss'] + tf.multiply(vars_cost, l2norm_scaling),tf.trainable_variables()),global_norm_gradient_clipping_ratio)
+    GNN['train_step'] = optimizer.apply_gradients(zip(grads, tf.trainable_variables()))
     
     GNN['C_n'] = C_n
     

@@ -3,11 +3,7 @@
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import sys, os, time, random, argparse, timeit
-# Use the TensorFlow v1 compatibility API to maintain TF 1.x behaviour under
-# TensorFlow 2.x. This allows the code to run on modern CUDA-enabled
-# GPUs without modifications to the training loop.
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
 import numpy as np
 from itertools import islice
 from functools import reduce
@@ -163,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('-timesteps', default=32, type=int, help='# Timesteps')
     parser.add_argument('-epochs', default=10000, type=int, help='Training epochs')
     parser.add_argument('-batchsize', default=8, type=int, help='Batch size')
-    parser.add_argument('-path', default="../GNN-GCP/adversarial-training", type=str, help='Path to instances')
+    parser.add_argument('-path', default="adversarial-training", type=str, help='Path to instances')
     parser.add_argument('-loadpath', default=".", type=str, help='Path to checkpoints to be loaded')
     parser.add_argument('-seed', type=int, default=42, help='RNG seed for Python, Numpy and Tensorflow')
     parser.add_argument('--load', const=True, default=False, action='store_const', help='Load model checkpoint?')
@@ -177,7 +173,7 @@ if __name__ == '__main__':
     # Set RNG seed for Python, Numpy and Tensorflow
     random.seed(vars(args)['seed'])
     np.random.seed(vars(args)['seed'])
-    tf.compat.v1.set_random_seed(vars(args)['seed'])
+    tf.set_random_seed(vars(args)['seed'])
     seed = str(vars(args)['seed'])
     # Setup parameters
     d                       = vars(args)['d']
@@ -209,15 +205,15 @@ if __name__ == '__main__':
     GNN = build_network(d)
 
     # Comment the following line to allow GPU use
-    config = tf.compat.v1.ConfigProto()
+    config = tf.ConfigProto()
     #config.gpu_options.per_process_gpu_memory_fraction = 0.5
     config.gpu_options.allow_growth=True
 
-    with tf.compat.v1.Session(config=config) as sess:
+    with tf.Session(config=config) as sess:
 
         # Initialize global variables
         print('Initializing global variables ... ', flush=True)
-        sess.run(tf.compat.v1.global_variables_initializer())
+        sess.run( tf.global_variables_initializer() )
 
         # Restore saved weights
         if load_checkpoints: load_weights(sess,loadpath);
